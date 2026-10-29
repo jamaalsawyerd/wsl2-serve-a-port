@@ -1,9 +1,9 @@
 // Command serve-a-port exposes WSL2 ports to the local network.
 //
-// The Bubble Tea UI is still to come; for now it's a plain CLI over the
-// system layer:
+// With no arguments it starts the interactive UI. Subcommands do the same
+// things non-interactively, for scripts:
 //
-//	serve-a-port [status]
+//	serve-a-port status
 //	serve-a-port add <ports>     e.g. 3000 or "3000, 8000-8010"
 //	serve-a-port rm <ports>
 //	serve-a-port repair
@@ -17,10 +17,13 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/forward"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/portproxy"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/ports"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/state"
+	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/tui"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/wsl"
 )
 
@@ -32,6 +35,10 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 0 {
+		return runTUI()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -46,11 +53,7 @@ func run(args []string) error {
 	}
 	m := forward.NewManager(env, store)
 
-	cmd := "status"
-	if len(args) > 0 {
-		cmd = args[0]
-	}
-	switch cmd {
+	switch cmd := args[0]; cmd {
 	case "status":
 		printChecks(env)
 		snap, err := m.Snapshot(ctx)
@@ -99,6 +102,23 @@ func run(args []string) error {
 	default:
 		return errors.New("usage: serve-a-port [status | add <ports> | rm <ports> | repair]")
 	}
+}
+
+func runTUI() error {
+	store, err := state.DefaultStore()
+	if err != nil {
+		return err
+	}
+	deps := tui.Deps{
+		Detect: wsl.NewDetector().Detect,
+		Connect: func(env wsl.Report) (tui.Service, error) {
+			return forward.NewManager(env, store), nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err = tea.NewProgram(tui.New(ctx, deps), tea.WithContext(ctx)).Run()
+	return err
 }
 
 func printChecks(env wsl.Report) {

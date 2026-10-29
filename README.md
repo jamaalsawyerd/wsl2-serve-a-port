@@ -26,13 +26,17 @@ make build
 ./bin/serve-a-port
 ```
 
-## Usage (pre-TUI)
+## Usage
 
-The interactive UI is in progress. Until then, the CLI exposes the same
-operations:
+Run `serve-a-port` with no arguments for the interactive dashboard: your WSL
+and Windows LAN IPs, every forwarded port with a live status, and hints for
+servers that are listening but not shared yet. (Adding and removing ports
+from the dashboard is in progress.)
+
+The same operations are available as subcommands for scripting:
 
 ```sh
-serve-a-port                   # environment checks, IPs, forwards, listeners
+serve-a-port status            # environment checks, IPs, forwards, listeners
 serve-a-port add 3000          # forward one port
 serve-a-port add 8000-8010     # or a range (max 256 ports)
 serve-a-port rm 3000           # stop forwarding

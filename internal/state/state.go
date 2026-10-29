@@ -105,6 +105,9 @@ func (s Store) Save(st *State) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return fmt.Errorf("creating state dir: %w", err)
 	}
+	if st.Forwards == nil {
+		st.Forwards = []Forward{} // "[]" rather than "null" on disk
+	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
