@@ -49,7 +49,8 @@ func settle(t *testing.T, m Model, cmd tea.Cmd) Model {
 			continue
 		}
 		switch msg.(type) {
-		case frameMsg, spinner.TickMsg, toastExpiredMsg, tea.QuitMsg:
+		case frameMsg, spinner.TickMsg, toastExpiredMsg, tea.QuitMsg,
+			celebrateMsg, relistenTickMsg, fullRefreshMsg:
 			continue
 		}
 		next, c2 := m.Update(msg)

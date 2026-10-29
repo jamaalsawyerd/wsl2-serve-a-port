@@ -3,7 +3,9 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"image/color"
+	"slices"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -16,6 +18,7 @@ import (
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/forward"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/netinfo"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/portproxy"
+	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/ports"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/wsl"
 )
 
@@ -25,6 +28,7 @@ type Service interface {
 	Add(ctx context.Context, snap forward.Snapshot, ports []int, takeOver bool) ([]portproxy.Result, error)
 	Remove(ctx context.Context, ports []int) ([]portproxy.Result, error)
 	Repair(ctx context.Context, snap forward.Snapshot) ([]portproxy.Result, error)
+	Relisten(snap forward.Snapshot) (forward.Snapshot, error)
 }
 
 // Deps are the UI's hooks into the system, swappable in tests.
@@ -42,6 +46,7 @@ const (
 	screenConfirm
 	screenApplying
 	screenResult
+	screenQR
 )
 
 type (
@@ -54,6 +59,13 @@ type (
 	enterDashboardMsg struct{}
 	frameMsg          struct{}
 	toastExpiredMsg   struct{ id int }
+	relistenTickMsg   struct{}
+	fullRefreshMsg    struct{}
+	liveMsg           struct {
+		snap forward.Snapshot
+		gen  int
+		err  error
+	}
 )
 
 const (
@@ -62,6 +74,10 @@ const (
 	bootHold        = 650 * time.Millisecond
 	toastDuration   = 3 * time.Second
 	snapshotTimeout = 30 * time.Second
+	// relistenInterval polls the cheap WSL-side state; fullRefreshInterval
+	// re-asks Windows, which costs a few PowerShell launches.
+	relistenInterval    = 3 * time.Second
+	fullRefreshInterval = time.Minute
 )
 
 type toastKind int
@@ -101,6 +117,9 @@ type Model struct {
 	snap       forward.Snapshot
 	cursor     int
 	refreshing bool
+	// snapGen counts full snapshots, so a background relisten started
+	// before one can't overwrite it.
+	snapGen int
 
 	toast     string
 	toastKind toastKind
@@ -112,6 +131,12 @@ type Model struct {
 	pending  action
 	results  []portproxy.Result
 	applyErr error
+
+	// Fun.
+	qrPort    int
+	qrHost    int
+	celebrate celebration
+	party     bool
 }
 
 // New returns the root model. ctx bounds every system call it makes.
@@ -169,6 +194,27 @@ func (m Model) fetch() tea.Cmd {
 	}
 }
 
+func (m Model) relisten() tea.Cmd {
+	svc, snap, gen := m.svc, m.snap, m.snapGen
+	return func() tea.Msg {
+		s, err := svc.Relisten(snap)
+		return liveMsg{s, gen, err}
+	}
+}
+
+func relistenTick() tea.Cmd {
+	return tea.Tick(relistenInterval, func(time.Time) tea.Msg { return relistenTickMsg{} })
+}
+
+func fullRefreshTick() tea.Cmd {
+	return tea.Tick(fullRefreshInterval, func(time.Time) tea.Msg { return fullRefreshMsg{} })
+}
+
+// watching reports whether the current screen shows live status.
+func (m Model) watching() bool {
+	return m.svc != nil && (m.screen == screenDashboard || m.screen == screenQR)
+}
+
 func (m *Model) showToast(kind toastKind, text string) tea.Cmd {
 	m.toastID++
 	m.toast, m.toastKind = text, kind
@@ -213,8 +259,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case screenResult:
 			switch msg.String() {
 			case "enter", "esc", "q", " ":
-				m.screen = screenDashboard
+				m.screen, m.party = screenDashboard, false
 			}
+		case screenQR:
+			return m.updateQRKeys(msg)
 		}
 		return m, nil
 
@@ -258,6 +306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.showToast(toastError, msg.err.Error())
 		}
 		m.snap = msg.snap
+		m.snapGen++
 		m.clampCursor()
 		if m.screen == screenBoot {
 			m.bootDone = true
@@ -267,6 +316,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case enterDashboardMsg:
 		m.screen = screenDashboard
+		return m, tea.Batch(relistenTick(), fullRefreshTick())
+
+	case relistenTickMsg:
+		if m.watching() && !m.refreshing {
+			return m, tea.Batch(m.relisten(), relistenTick())
+		}
+		return m, relistenTick()
+
+	case fullRefreshMsg:
+		if m.watching() && !m.refreshing {
+			m.refreshing = true
+			return m, tea.Batch(m.fetch(), fullRefreshTick())
+		}
+		return m, fullRefreshTick()
+
+	case liveMsg:
+		// Polling errors are transient (or will surface on the next full
+		// refresh), and results based on an older snapshot are stale.
+		if msg.err != nil || msg.gen != m.snapGen || m.refreshing {
+			return m, nil
+		}
+		note := liveChanges(m.snap, msg.snap)
+		m.snap = msg.snap
+		m.clampCursor()
+		if note != "" {
+			return m, m.showToast(toastSuccess, note)
+		}
+		return m, nil
+
+	case celebrateMsg:
+		if msg.id != m.celebrate.id || !m.celebrate.active() {
+			return m, nil
+		}
+		var running bool
+		if m.celebrate, running = m.celebrate.step(); running {
+			return m, celebrateTick(msg.id)
+		}
 		return m, nil
 
 	case toastExpiredMsg:
@@ -279,7 +365,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenResult
 		m.results, m.applyErr = msg.results, msg.err
 		m.refreshing = true
-		return m, m.fetch()
+		cmds := []tea.Cmd{m.fetch()}
+		if msg.act.kind != actRemove && msg.err == nil && slices.ContainsFunc(msg.results, func(r portproxy.Result) bool { return r.OK }) {
+			m.party = true
+			cmds = append(cmds, m.startCelebration(m.resultWidth()))
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Anything else is internal to the form (cursor blinks, field changes).
@@ -307,6 +398,63 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, cmd
+}
+
+func (m Model) updateQRKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	n := max(1, len(m.hosts()))
+	switch msg.String() {
+	case "esc", "enter", "q":
+		m.screen = screenDashboard
+	case "right", "l", "tab":
+		m.qrHost = (m.qrHost + 1) % n
+	case "left", "h", "shift+tab":
+		m.qrHost = (m.qrHost + n - 1) % n
+	case "c":
+		if len(m.hosts()) > 0 {
+			return m.copyURL(m.urlFor(m.qrPort, m.qrHost))
+		}
+	}
+	return m, nil
+}
+
+// copyURL puts url on the clipboard via OSC 52, which Windows Terminal
+// supports, so it lands on the Windows clipboard.
+func (m Model) copyURL(url string) (tea.Model, tea.Cmd) {
+	toast := m.showToast(toastSuccess, "📋 Copied "+url)
+	return m, tea.Batch(tea.SetClipboard(url), toast)
+}
+
+// liveChanges describes forwards that went live or stopped since old, for a
+// toast. It returns "" when nothing interesting changed.
+func liveChanges(old, cur forward.Snapshot) string {
+	var up, down, stale []int
+	for _, e := range cur.Entries {
+		prev, ok := old.Entry(e.Port)
+		if !ok || !e.Managed || prev.Status == e.Status {
+			continue
+		}
+		switch {
+		case e.Status == forward.StatusLive:
+			up = append(up, e.Port)
+		case e.Status == forward.StatusStale:
+			stale = append(stale, e.Port)
+		case prev.Status == forward.StatusLive:
+			down = append(down, e.Port)
+		}
+	}
+	switch {
+	case len(stale) > 0:
+		return "↻ The WSL IP changed. Press r to repair."
+	case len(up) == 1:
+		return fmt.Sprintf("✨ :%d is live!", up[0])
+	case len(up) > 1:
+		return "✨ " + ports.Format(up) + " are live!"
+	case len(down) == 1:
+		return fmt.Sprintf("💤 :%d stopped listening", down[0])
+	case len(down) > 1:
+		return "💤 " + ports.Format(down) + " stopped listening"
+	}
+	return ""
 }
 
 func (m Model) startAdd() (tea.Model, tea.Cmd) {
@@ -359,6 +507,17 @@ func (m Model) updateDashboardKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.Add):
 		return m.startAdd()
+	case key.Matches(msg, m.keys.Share):
+		if len(m.snap.Entries) == 0 {
+			return m, nil
+		}
+		m.qrPort, m.qrHost, m.screen = m.snap.Entries[m.cursor].Port, 0, screenQR
+		return m, nil
+	case key.Matches(msg, m.keys.Copy):
+		if len(m.snap.Entries) == 0 || len(m.hosts()) == 0 {
+			return m, nil
+		}
+		return m.copyURL(m.shareURL(m.snap.Entries[m.cursor].Port))
 	case key.Matches(msg, m.keys.Remove):
 		if len(m.snap.Entries) == 0 {
 			return m, m.showToast(toastInfo, "Nothing to remove yet")
@@ -404,6 +563,8 @@ func (m Model) View() tea.View {
 		content = m.applyingView()
 	case screenResult:
 		content = m.resultView()
+	case screenQR:
+		content = m.qrView()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

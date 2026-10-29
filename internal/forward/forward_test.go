@@ -93,15 +93,21 @@ type fakeBackend struct {
 	fail     map[int]bool
 	declined bool
 	scripts  []string
+
+	ip        netip.Addr // defaults to wslIP
+	listeners []netinfo.Listener
 }
 
 func (f *fakeBackend) WSLIP() (netinfo.WSLAddr, error) {
+	if f.ip.IsValid() {
+		return netinfo.WSLAddr{Interface: "eth0", IP: f.ip}, nil
+	}
 	return netinfo.WSLAddr{Interface: "eth0", IP: wslIP}, nil
 }
 func (f *fakeBackend) WindowsIPs(context.Context) ([]netinfo.WindowsAddr, error) {
 	return nil, errors.New("powershell sad")
 }
-func (f *fakeBackend) Listeners(netip.Addr) ([]netinfo.Listener, error) { return nil, nil }
+func (f *fakeBackend) Listeners(netip.Addr) ([]netinfo.Listener, error) { return f.listeners, nil }
 func (f *fakeBackend) Rules(context.Context) ([]portproxy.Rule, error)  { return f.rules, nil }
 func (f *fakeBackend) FirewallPorts(context.Context, bool) ([]int, error) {
 	return f.firewall, nil
@@ -215,5 +221,43 @@ func TestFillMissing(t *testing.T) {
 	got := fillMissing(ops, []portproxy.Result{{Op: portproxy.OpAdd, Port: 2, OK: true}})
 	if got[0].OK || got[0].Message == "" || !got[1].OK {
 		t.Errorf("fillMissing = %+v", got)
+	}
+}
+
+func TestRelisten(t *testing.T) {
+	ctx := context.Background()
+	b := &fakeBackend{firewall: []int{3000}}
+	m := newTestManager(t, b)
+	if _, err := m.Add(ctx, Snapshot{WSL: netinfo.WSLAddr{IP: wslIP}}, []int{3000}, false); err != nil {
+		t.Fatal(err)
+	}
+	b.rules = []portproxy.Rule{{ListenAddress: "0.0.0.0", ListenPort: 3000, ConnectAddress: wslIP.String(), ConnectPort: 3000}}
+	snap, err := m.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := snap.Entry(3000); e.Status != StatusIdle {
+		t.Fatalf("before: %s, want idle", e.Status)
+	}
+
+	// A server starts.
+	b.listeners = []netinfo.Listener{{Port: 3000, Reachable: true, Process: "node"}}
+	b.scripts = nil
+	live, err := m.Relisten(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := live.Entry(3000); e.Status != StatusLive || e.Listener.Process != "node" {
+		t.Errorf("after start: %+v", e)
+	}
+	if e, _ := snap.Entry(3000); e.Status != StatusIdle {
+		t.Error("Relisten mutated the input snapshot")
+	}
+
+	// WSL restarts with a new IP.
+	b.ip = netip.MustParseAddr("172.17.99.1")
+	moved, _ := m.Relisten(live)
+	if e, _ := moved.Entry(3000); e.Status != StatusStale || moved.WSL.IP != b.ip {
+		t.Errorf("after IP change: %s, WSL %v", e.Status, moved.WSL.IP)
 	}
 }

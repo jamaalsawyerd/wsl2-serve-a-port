@@ -145,6 +145,37 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	return snap, nil
 }
 
+// Relisten refreshes just the WSL-side facts (the WSL IP and listening
+// sockets) and recomputes statuses. It spawns no Windows processes, so it's
+// cheap enough to poll every few seconds. A changed WSL IP shows up as
+// stale entries.
+func (m *Manager) Relisten(snap Snapshot) (Snapshot, error) {
+	addr, err := m.Backend.WSLIP()
+	if err != nil {
+		return snap, fmt.Errorf("finding the WSL IP: %w", err)
+	}
+	listeners, err := m.Backend.Listeners(addr.IP)
+	if err != nil {
+		return snap, fmt.Errorf("reading listening ports: %w", err)
+	}
+
+	out := snap
+	out.WSL, out.Listeners = addr, listeners
+	out.Entries = slices.Clone(snap.Entries)
+	for i := range out.Entries {
+		e := &out.Entries[i]
+		e.Listener = nil
+		for j := range listeners {
+			if listeners[j].Port == e.Port {
+				e.Listener = &listeners[j]
+				break
+			}
+		}
+		e.Status = entryStatus(*e, addr.IP, m.Mirrored)
+	}
+	return out, nil
+}
+
 // ConflictError means some ports already have portproxy rules this app
 // didn't create. Retry Add with takeOver to replace them.
 type ConflictError struct {

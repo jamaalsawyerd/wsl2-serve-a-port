@@ -72,6 +72,7 @@ type fakeService struct {
 	takeOver bool
 	removed  []int
 	repaired []int
+	relisten func(forward.Snapshot) forward.Snapshot
 }
 
 func (f *fakeService) Snapshot(context.Context) (forward.Snapshot, error) {
@@ -99,6 +100,13 @@ func (f *fakeService) Add(_ context.Context, _ forward.Snapshot, ps []int, takeO
 func (f *fakeService) Remove(_ context.Context, ps []int) ([]portproxy.Result, error) {
 	f.removed = ps
 	return f.results(portproxy.OpRemove, ps)
+}
+
+func (f *fakeService) Relisten(snap forward.Snapshot) (forward.Snapshot, error) {
+	if f.relisten != nil {
+		return f.relisten(snap), nil
+	}
+	return snap, nil
 }
 
 func (f *fakeService) Repair(_ context.Context, snap forward.Snapshot) ([]portproxy.Result, error) {

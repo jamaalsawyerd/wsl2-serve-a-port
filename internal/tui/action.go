@@ -193,9 +193,11 @@ func (m Model) applyingView() string {
 	return m.page(content)
 }
 
+func (m Model) resultWidth() int { return min(maxFormWide, m.width-2*gutter) }
+
 func (m Model) resultView() string {
 	t := m.theme
-	width := min(maxFormWide, m.width-2*gutter)
+	width := m.resultWidth()
 	var lines []string
 
 	switch {
@@ -214,7 +216,7 @@ func (m Model) resultView() string {
 		}
 		switch {
 		case ok == len(m.results):
-			lines = append(lines, t.OK.Render(m.successTitle()))
+			lines = append(lines, strings.Repeat(" ", m.celebrate.titleOffset())+t.OK.Render(m.successTitle()))
 		case ok == 0:
 			lines = append(lines, t.Bad.Render("✗ Nothing changed"))
 		default:
@@ -231,7 +233,13 @@ func (m Model) resultView() string {
 	}
 
 	lines = append(lines, "", m.keyHint("enter", "back to dashboard"))
-	return m.page(t.Card.Padding(1, 2).Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, lines...)))
+	card := t.Card.Padding(1, 2).Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	if m.party {
+		// The band stays (blank) after the confetti lands so the card
+		// doesn't jump.
+		card = m.celebrate.confettiView(width) + "\n" + card
+	}
+	return m.page(card)
 }
 
 func (m Model) successTitle() string {

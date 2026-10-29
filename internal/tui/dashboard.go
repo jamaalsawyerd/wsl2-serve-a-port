@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/forward"
+	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/netinfo"
 )
 
 const (
@@ -264,16 +265,20 @@ func (m Model) toastView() string {
 	}
 }
 
-func (m Model) shareURL(port int) string {
-	if len(m.snap.Windows) == 0 {
+// hosts are the Windows addresses other devices can reach, best first. In
+// mirrored mode WSL shares these addresses, so they work there too.
+func (m Model) hosts() []netinfo.WindowsAddr { return m.snap.Windows }
+
+// urlFor is the share URL for port via the host'th Windows address.
+func (m Model) urlFor(port, host int) string {
+	hosts := m.hosts()
+	if len(hosts) == 0 {
 		return "—"
 	}
-	host := m.snap.Windows[0].IP.String()
-	if m.snap.Mirrored {
-		host = m.snap.WSL.IP.String()
-	}
-	return fmt.Sprintf("http://%s:%d", host, port)
+	return fmt.Sprintf("http://%s:%d", hosts[host%len(hosts)].IP, port)
 }
+
+func (m Model) shareURL(port int) string { return m.urlFor(port, 0) }
 
 func processName(e forward.Entry) string {
 	switch {

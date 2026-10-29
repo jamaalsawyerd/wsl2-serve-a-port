@@ -38,12 +38,18 @@ servers that are listening but not shared yet.
 | `d` | Remove the selected forward |
 | `D` | Remove every forward serve-a-port created |
 | `r` | Repair forwards that point at an old WSL IP or lost their rules |
+| `enter` | Show a QR code for the selected port (←/→ switches network) |
+| `c` | Copy the share URL to the Windows clipboard |
 | `R` | Refresh |
 | `?` | All keys |
 | `q` | Quit (forwards stay in place) |
 
 Every change shows exactly what will run, then goes through one Windows admin
 (UAC) prompt.
+
+Statuses update live: start a dev server and its row flips to `● live`
+within a few seconds. If WSL restarts with a new IP, affected forwards turn
+`↻ stale` and `r` fixes them.
 
 The same operations are available as subcommands for scripting:
 
