@@ -4,37 +4,9 @@ A colorful terminal app that shares ports from WSL2 with every device on your
 network, so your phone, tablet, or a teammate's laptop can open the dev server
 running inside WSL.
 
-```
-  ╔═╗╔═╗╦═╗╦  ╦╔═╗  ╔═╗  ╔═╗╔═╗╦═╗╔╦╗
-  ╚═╗║╣ ╠╦╝╚╗╔╝║╣ ──╠═╣──╠═╝║ ║╠╦╝ ║
-  ╚═╝╚═╝╩╚═ ╚╝ ╚═╝  ╩ ╩  ╩  ╚═╝╩╚═ ╩
-  beam your WSL2 ports to every device on the network ✨
+![serve-a-port repairing a stale forward, sharing a dev server, and showing a QR code](docs/demo.gif)
 
-  ╭───────────────────────╮  ╭────────────────────────────────╮
-  │  🐧 WSL2              │  │  ⊞ Windows LAN                 │
-  │  172.28.112.5         │  │  192.168.1.42                  │
-  │  eth0 · Ubuntu-24.04  │  │  Wi-Fi                         │
-  ╰───────────────────────╯  │  + 100.101.102.103  Tailscale  │
-                             ╰────────────────────────────────╯
-  NAT mode · 5 forwards · updated 10:39:57
-
-  ╭────────────────────────────────────────────────────────╮
-  │   PORT  STATUS       PROCESS  SHARE URL                │
-  ├────────────────────────────────────────────────────────┤
-  │ ▸ 3000  ● live       node     http://192.168.1.42:3000 │
-  │   4321  ↻ stale      —        http://192.168.1.42:4321 │
-  │   5173  ● live       vite     http://192.168.1.42:5173 │
-  │   8000  ○ idle       —        http://192.168.1.42:8000 │
-  │   8080  ◐ localhost  python3  http://192.168.1.42:8080 │
-  ╰────────────────────────────────────────────────────────╯
-  ✨ Live! Anyone on your network can open http://192.168.1.42:3000
-  💡 storybook is listening on :6006. Press a to share it.
-
-  a add port • d remove • r repair • enter qr code • c copy url • ? more • q quit
-```
-
-<sub>Captured from `serve-a-port demo`, which uses made-up data. In a real
-terminal it's in full synthwave color.</sub>
+<sub>Recorded from `serve-a-port demo`, which uses made-up data.</sub>
 
 ## Features
 
