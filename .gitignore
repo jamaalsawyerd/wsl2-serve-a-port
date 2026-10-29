@@ -1,0 +1,14 @@
+# Build output
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
