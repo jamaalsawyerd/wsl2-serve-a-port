@@ -1,0 +1,32 @@
+# GoReleaser config: tagging vX.Y.Z publishes Linux binaries for WSL.
+version: 2
+
+project_name: serve-a-port
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/serve-a-port
+    binary: serve-a-port
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    # arm64 covers WSL on Windows on ARM.
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    # No version in the name, so releases/latest/download URLs stay stable.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md, LICENSE]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc

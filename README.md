@@ -64,6 +64,16 @@ terminal it's in full synthwave color.</sub>
 
 ## Install
 
+Grab a prebuilt binary (use `arm64` instead of `amd64` on Windows on ARM):
+
+```sh
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/jamaalsawyerd/wsl2-serve-a-port/releases/latest/download/serve-a-port_linux_amd64.tar.gz \
+  | tar -xz -C ~/.local/bin serve-a-port
+```
+
+Or with Go:
+
 ```sh
 go install github.com/jamaalsawyerd/wsl2-serve-a-port/cmd/serve-a-port@latest
 ```
