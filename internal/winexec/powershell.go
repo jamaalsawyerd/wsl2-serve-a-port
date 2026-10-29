@@ -11,15 +11,23 @@ type PowerShell struct {
 	Runner Runner
 }
 
-// utf8Prelude makes PowerShell write UTF-8 so non-ASCII adapter names survive
-// the trip back into WSL.
-const utf8Prelude = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+// prelude makes scripts behave predictably when run from WSL:
+//   - UTF-8 output, so non-ASCII adapter names survive the trip back;
+//   - no progress records, which otherwise arrive on stderr as CLIXML;
+//   - terminating errors print a plain message and exit 1, and anything
+//     else exits 0, even if the last command "failed" quietly under
+//     -ErrorAction SilentlyContinue.
+const prelude = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+trap { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+`
 
 // Command runs script without elevation and returns its cleaned stdout.
 func (p PowerShell) Command(ctx context.Context, script string) (string, error) {
 	out, err := p.Runner.Run(ctx, p.Exe,
 		"-NoProfile", "-NonInteractive",
-		"-EncodedCommand", EncodeCommand(utf8Prelude+script))
+		"-EncodedCommand", EncodeCommand(prelude+script+"\nexit 0\n"))
 	return Clean(out), err
 }
 

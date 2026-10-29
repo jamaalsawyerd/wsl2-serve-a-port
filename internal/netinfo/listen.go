@@ -48,7 +48,7 @@ func Listeners(wslIP netip.Addr) ([]Listener, error) {
 			return nil, err
 		}
 		s, err := parseProcNetTCP(f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", path, err)
 		}

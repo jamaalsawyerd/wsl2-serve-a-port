@@ -89,8 +89,8 @@ func (e *Elevator) RunScript(ctx context.Context, script string) ([]byte, error)
 	if err := os.WriteFile(wslScript, append([]byte("\xEF\xBB\xBF"), script...), 0o600); err != nil {
 		return nil, fmt.Errorf("writing script: %w", err)
 	}
-	defer os.Remove(wslScript)
-	defer os.Remove(wslResult)
+	defer func() { _ = os.Remove(wslScript) }()
+	defer func() { _ = os.Remove(wslResult) }()
 
 	if _, err := e.PS.Command(ctx, e.launcher(winScript, winResult)); err != nil {
 		if exitErr, ok := errors.AsType[*ExitError](err); ok && exitErr.Code == exitCancelled {

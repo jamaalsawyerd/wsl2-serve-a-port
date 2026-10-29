@@ -28,7 +28,7 @@ func WSLIP() (WSLAddr, error) {
 		if name := defaultRouteIface(f); name != "" {
 			iface = name
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	ifc, err := net.InterfaceByName(iface)

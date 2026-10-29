@@ -65,7 +65,9 @@ func TestLoadErrors(t *testing.T) {
 		"future":  `{"version": 99, "forwards": []}`,
 	} {
 		path := filepath.Join(dir, name+".json")
-		os.WriteFile(path, []byte(body), 0o644)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := (Store{Path: path}).Load(); err == nil {
 			t.Errorf("%s: Load succeeded, want error", name)
 		} else if name == "future" && !strings.Contains(err.Error(), "newer") {
