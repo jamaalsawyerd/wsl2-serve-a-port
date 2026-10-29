@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -62,6 +63,11 @@ function Remove-Proxy($port) {
   $ErrorActionPreference = 'Continue'
   & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$port 2>&1 | Out-Null
 }
+# portproxy passes no traffic unless the IP Helper service is running.
+function Start-IPHelper {
+  $s = Get-Service iphlpsvc -ErrorAction SilentlyContinue
+  if ($s -and $s.Status -ne 'Running') { Start-Service iphlpsvc }
+}
 try {
 `
 
@@ -77,6 +83,10 @@ const scriptFooter = `} finally {
 func BuildScript(ops []Op, mirrored bool) (string, error) {
 	var b strings.Builder
 	b.WriteString(scriptHeader)
+	if !mirrored && slices.ContainsFunc(ops, func(op Op) bool { return op.Kind == OpAdd }) {
+		// Best effort: the dashboard warns if it's still stopped.
+		b.WriteString("  try { Start-IPHelper } catch { }\n")
+	}
 	for _, op := range ops {
 		if op.Port < 1 || op.Port > 65535 {
 			return "", fmt.Errorf("invalid port %d", op.Port)

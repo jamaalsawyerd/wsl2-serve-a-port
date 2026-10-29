@@ -47,6 +47,7 @@ const (
 	screenApplying
 	screenResult
 	screenQR
+	screenQuit
 )
 
 type (
@@ -137,6 +138,9 @@ type Model struct {
 	qrHost    int
 	celebrate celebration
 	party     bool
+
+	// quitAfter exits once a tear-down from the quit prompt succeeds.
+	quitAfter bool
 }
 
 // New returns the root model. ctx bounds every system call it makes.
@@ -263,6 +267,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case screenQR:
 			return m.updateQRKeys(msg)
+		case screenQuit:
+			switch msg.String() {
+			case "enter", "q", "y", "k":
+				return m, tea.Quit
+			case "t":
+				m.pending = action{kind: actRemove, ports: m.managedPorts()}
+				m.quitAfter, m.screen = true, screenApplying
+				return m, m.apply(m.pending)
+			case "esc", "n":
+				m.screen = screenDashboard
+			}
 		}
 		return m, nil
 
@@ -362,6 +377,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case applyDoneMsg:
+		if m.quitAfter {
+			m.quitAfter = false
+			if msg.err == nil && !slices.ContainsFunc(msg.results, func(r portproxy.Result) bool { return !r.OK }) {
+				return m, tea.Quit
+			}
+			// Show what went wrong instead of leaving silently.
+		}
 		m.screen = screenResult
 		m.results, m.applyErr = msg.results, msg.err
 		m.refreshing = true
@@ -468,6 +490,17 @@ func (m Model) confirm(act action) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// managedPorts are the forwards serve-a-port created.
+func (m Model) managedPorts() []int {
+	var out []int
+	for _, e := range m.snap.Entries {
+		if e.Managed {
+			out = append(out, e.Port)
+		}
+	}
+	return out
+}
+
 func (m Model) listener(port int) *netinfo.Listener {
 	for i := range m.snap.Listeners {
 		if m.snap.Listeners[i].Port == port {
@@ -491,7 +524,10 @@ func (m Model) updateBootKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateDashboardKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
-		return m, tea.Quit
+		if len(m.managedPorts()) == 0 {
+			return m, tea.Quit
+		}
+		m.screen = screenQuit
 	case key.Matches(msg, m.keys.Up):
 		m.cursor--
 		m.clampCursor()
@@ -524,12 +560,7 @@ func (m Model) updateDashboardKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.confirm(action{kind: actRemove, ports: []int{m.snap.Entries[m.cursor].Port}})
 	case key.Matches(msg, m.keys.RemoveAll):
-		var managed []int
-		for _, e := range m.snap.Entries {
-			if e.Managed {
-				managed = append(managed, e.Port)
-			}
-		}
+		managed := m.managedPorts()
 		if len(managed) == 0 {
 			return m, m.showToast(toastInfo, "No serve-a-port forwards to remove")
 		}
@@ -565,6 +596,8 @@ func (m Model) View() tea.View {
 		content = m.resultView()
 	case screenQR:
 		content = m.qrView()
+	case screenQuit:
+		content = m.quitView()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

@@ -15,7 +15,13 @@ function Remove-Proxy($port) {
   $ErrorActionPreference = 'Continue'
   & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$port 2>&1 | Out-Null
 }
+# portproxy passes no traffic unless the IP Helper service is running.
+function Start-IPHelper {
+  $s = Get-Service iphlpsvc -ErrorAction SilentlyContinue
+  if ($s -and $s.Status -ne 'Running') { Start-Service iphlpsvc }
+}
 try {
+  try { Start-IPHelper } catch { }
   try {
     Remove-Proxy 3000
     Invoke-Netsh @('interface','portproxy','add','v4tov4','listenaddress=0.0.0.0','listenport=3000','connectaddress=172.17.213.47','connectport=3000')

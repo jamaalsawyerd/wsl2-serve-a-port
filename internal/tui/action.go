@@ -182,6 +182,23 @@ func (m Model) confirmRow(kind actionKind, port int) string {
 	return row
 }
 
+func (m Model) quitView() string {
+	t := m.theme
+	managed := m.managedPorts()
+	width := m.resultWidth()
+	lines := []string{
+		t.CardTitle.Render("Heading out? 👋"),
+		"",
+		t.Body.Width(width - 6).Render(plural(len(managed), "port") + " will stay open to your network:"),
+		t.Accent.Render("  " + ansi.Truncate(ports.Format(managed), width-10, "…")),
+		"",
+		t.Dim.Width(width - 6).Render("Forwards survive reboots. If the WSL IP changes, run serve-a-port again and press r."),
+		"",
+		m.keyHint("enter", "keep & quit", "t", "tear down & quit", "esc", "stay"),
+	}
+	return m.page(t.Card.Padding(1, 2).Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, lines...)))
+}
+
 func (m Model) applyingView() string {
 	t := m.theme
 	content := lipgloss.JoinVertical(lipgloss.Left,
@@ -258,7 +275,11 @@ func (m Model) resultRow(r portproxy.Result, width int) string {
 	t := m.theme
 	head := fmt.Sprintf("%-6d", r.Port)
 	if !r.OK {
-		return t.Bad.Render("✗ ") + t.Body.Render(head) + t.Dim.Render(ansi.Truncate(r.Message, max(10, width-10), "…"))
+		row := t.Bad.Render("✗ ") + t.Body.Render(head) + t.Dim.Render(ansi.Truncate(r.Message, max(10, width-10), "…"))
+		if hint := portproxy.Hint(r.Message); hint != "" {
+			row += "\n" + t.Warn.Width(width).Render("  ↳ "+hint)
+		}
+		return row
 	}
 	if r.Op == portproxy.OpAdd {
 		return t.OK.Render("✓ ") + t.Body.Render(head) + t.URL.Render(m.shareURL(r.Port))

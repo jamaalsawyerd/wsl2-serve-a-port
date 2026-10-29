@@ -39,6 +39,33 @@ func TestParseRules(t *testing.T) {
 	}
 }
 
+func TestParseServiceRunning(t *testing.T) {
+	running := "SERVICE_NAME: iphlpsvc\n        TYPE               : 30  WIN32\n        STATE              : 4  RUNNING\n                                (STOPPABLE, NOT_PAUSABLE, IGNORES_SHUTDOWN)\n"
+	if ok, err := parseServiceRunning(running); !ok || err != nil {
+		t.Errorf("running: %v, %v", ok, err)
+	}
+	stopped := "SERVICE_NAME: iphlpsvc\n        TYP                : 30  WIN32\n        STATUS             : 1  STOPPED\n"
+	if ok, err := parseServiceRunning(stopped); ok || err != nil {
+		t.Errorf("stopped (localized label): %v, %v", ok, err)
+	}
+	if _, err := parseServiceRunning("[SC] OpenService FAILED 1060"); err == nil {
+		t.Error("expected error for unknown output")
+	}
+}
+
+func TestHint(t *testing.T) {
+	for msg, want := range map[string]string{
+		"Access is denied.": "Group Policy",
+		"The term 'New-NetFirewallHyperVRule' is not recognized as the name of a cmdlet": "Hyper-V firewall",
+		"The requested operation requires elevation.":                                    "administrator",
+		"The process cannot access the file":                                             "",
+	} {
+		if got := Hint(msg); (want == "") != (got == "") || !strings.Contains(got, want) {
+			t.Errorf("Hint(%q) = %q, want it to mention %q", msg, got, want)
+		}
+	}
+}
+
 func TestParseFirewallPorts(t *testing.T) {
 	out := "wsl2-serve-a-port-tcp-3000\nsomething-else\nwsl2-serve-a-port-tcp-x\nwsl2-serve-a-port-tcp-5173\n"
 	got := parseFirewallPorts(out, firewallRulePrefix)

@@ -96,7 +96,10 @@ type fakeBackend struct {
 
 	ip        netip.Addr // defaults to wslIP
 	listeners []netinfo.Listener
+	helperOff bool
 }
+
+func (f *fakeBackend) IPHelperRunning(context.Context) (bool, error) { return !f.helperOff, nil }
 
 func (f *fakeBackend) WSLIP() (netinfo.WSLAddr, error) {
 	if f.ip.IsValid() {
@@ -200,6 +203,22 @@ func TestAddRemoveRepair(t *testing.T) {
 	st, _ = m.Store.Load()
 	if len(st.Ports()) != 0 {
 		t.Errorf("state after remove = %v", st.Ports())
+	}
+}
+
+func TestIPHelperStopped(t *testing.T) {
+	m := newTestManager(t, &fakeBackend{helperOff: true})
+	snap, err := m.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.IPHelperStopped || !strings.Contains(strings.Join(snap.Warnings, "\n"), "IP Helper") {
+		t.Errorf("expected IP Helper warning: %+v", snap.Warnings)
+	}
+
+	m.Mirrored = true
+	if snap, _ = m.Snapshot(context.Background()); snap.IPHelperStopped {
+		t.Error("mirrored mode doesn't use portproxy, so IP Helper doesn't matter")
 	}
 }
 

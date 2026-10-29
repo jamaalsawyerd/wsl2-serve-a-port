@@ -15,6 +15,11 @@ function Remove-Proxy($port) {
   $ErrorActionPreference = 'Continue'
   & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$port 2>&1 | Out-Null
 }
+# portproxy passes no traffic unless the IP Helper service is running.
+function Start-IPHelper {
+  $s = Get-Service iphlpsvc -ErrorAction SilentlyContinue
+  if ($s -and $s.Status -ne 'Running') { Start-Service iphlpsvc }
+}
 try {
   try {
     Get-NetFirewallHyperVRule -Name 'wsl2-serve-a-port-hv-tcp-5173' -ErrorAction SilentlyContinue | Remove-NetFirewallHyperVRule

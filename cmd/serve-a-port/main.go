@@ -1,19 +1,14 @@
 // Command serve-a-port exposes WSL2 ports to the local network.
 //
-// With no arguments it starts the interactive UI. Subcommands do the same
-// things non-interactively, for scripts:
-//
-//	serve-a-port status
-//	serve-a-port add <ports>     e.g. 3000 or "3000, 8000-8010"
-//	serve-a-port rm <ports>
-//	serve-a-port repair
+// With no arguments it starts the interactive UI. See usage for the
+// subcommands, which do the same things non-interactively for scripts.
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -27,6 +22,23 @@ import (
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/wsl"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
+var version = ""
+
+const usage = `serve-a-port: share WSL2 ports with every device on your network
+
+Usage:
+  serve-a-port                 interactive dashboard
+  serve-a-port status          environment checks, IPs, forwards, listeners
+  serve-a-port add <ports>     forward ports, e.g. 3000 or "3000, 8000-8010"
+  serve-a-port rm <ports>      stop forwarding ports
+  serve-a-port repair          re-point forwards after the WSL IP changes
+  serve-a-port demo            try the dashboard with made-up data
+  serve-a-port version
+
+Changes need one Windows admin (UAC) prompt each.
+`
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "serve-a-port:", err)
@@ -36,7 +48,18 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return runTUI()
+		return runTUI(nil)
+	}
+	switch args[0] {
+	case "demo":
+		deps := tui.DemoDeps(900 * time.Millisecond)
+		return runTUI(&deps)
+	case "version", "--version", "-v":
+		fmt.Println("serve-a-port", buildVersion())
+		return nil
+	case "help", "--help", "-h":
+		fmt.Print(usage)
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -100,24 +123,40 @@ func run(args []string) error {
 		return err
 
 	default:
-		return errors.New("usage: serve-a-port [status | add <ports> | rm <ports> | repair]")
+		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 	}
 }
 
-func runTUI() error {
-	store, err := state.DefaultStore()
-	if err != nil {
-		return err
+// buildVersion prefers the ldflags version, then the module version that
+// `go install ...@vX` records.
+func buildVersion() string {
+	if version != "" {
+		return version
 	}
-	deps := tui.Deps{
-		Detect: wsl.NewDetector().Detect,
-		Connect: func(env wsl.Report) (tui.Service, error) {
-			return forward.NewManager(env, store), nil
-		},
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
+
+// runTUI starts the dashboard against the real system, or against deps if
+// given.
+func runTUI(deps *tui.Deps) error {
+	if deps == nil {
+		store, err := state.DefaultStore()
+		if err != nil {
+			return err
+		}
+		deps = &tui.Deps{
+			Detect: wsl.NewDetector().Detect,
+			Connect: func(env wsl.Report) (tui.Service, error) {
+				return forward.NewManager(env, store), nil
+			},
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, err = tea.NewProgram(tui.New(ctx, deps), tea.WithContext(ctx)).Run()
+	_, err := tea.NewProgram(tui.New(ctx, *deps), tea.WithContext(ctx)).Run()
 	return err
 }
 
@@ -177,6 +216,9 @@ func printResults(rs []portproxy.Result) {
 			fmt.Printf("  ✓ %s %d\n", r.Op, r.Port)
 		} else {
 			fmt.Printf("  ✗ %s %d: %s\n", r.Op, r.Port, r.Message)
+			if hint := portproxy.Hint(r.Message); hint != "" {
+				fmt.Printf("    ↳ %s\n", hint)
+			}
 		}
 	}
 }

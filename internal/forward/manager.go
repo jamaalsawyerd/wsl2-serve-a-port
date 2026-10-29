@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type Backend interface {
 	Listeners(wslIP netip.Addr) ([]netinfo.Listener, error)
 	Rules(ctx context.Context) ([]portproxy.Rule, error)
 	FirewallPorts(ctx context.Context, mirrored bool) ([]int, error)
+	IPHelperRunning(ctx context.Context) (bool, error)
 	RunElevated(ctx context.Context, script string) ([]byte, error)
 }
 
@@ -31,6 +33,7 @@ type systemBackend struct {
 	runner   winexec.Runner
 	ps       winexec.PowerShell
 	netsh    string
+	sc       string
 	elevator *winexec.Elevator
 }
 
@@ -38,7 +41,13 @@ type systemBackend struct {
 func System(env wsl.Report) Backend {
 	r := winexec.ExecRunner{}
 	ps := winexec.PowerShell{Exe: env.PowerShell, Runner: r}
-	return &systemBackend{runner: r, ps: ps, netsh: env.Netsh, elevator: winexec.NewElevator(ps)}
+	return &systemBackend{
+		runner:   r,
+		ps:       ps,
+		netsh:    env.Netsh,
+		sc:       filepath.Join(filepath.Dir(env.Netsh), "sc.exe"),
+		elevator: winexec.NewElevator(ps),
+	}
 }
 
 func (b *systemBackend) WSLIP() (netinfo.WSLAddr, error) { return netinfo.WSLIP() }
@@ -54,6 +63,9 @@ func (b *systemBackend) Rules(ctx context.Context) ([]portproxy.Rule, error) {
 func (b *systemBackend) FirewallPorts(ctx context.Context, mirrored bool) ([]int, error) {
 	return portproxy.FirewallPorts(ctx, b.ps, mirrored)
 }
+func (b *systemBackend) IPHelperRunning(ctx context.Context) (bool, error) {
+	return portproxy.IPHelperRunning(ctx, b.runner, b.sc)
+}
 func (b *systemBackend) RunElevated(ctx context.Context, script string) ([]byte, error) {
 	return b.elevator.RunScript(ctx, script)
 }
@@ -67,7 +79,10 @@ type Snapshot struct {
 	Mirrored  bool
 	// Warnings are non-fatal problems, e.g. Windows IPs couldn't be read.
 	Warnings []string
-	TakenAt  time.Time
+	// IPHelperStopped means portproxy rules exist on paper but pass no
+	// traffic. Adding or repairing starts the service.
+	IPHelperStopped bool
+	TakenAt         time.Time
 }
 
 // Entry returns the entry for port.
@@ -118,11 +133,18 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 		rules                  []portproxy.Rule
 		firewall               []int
 		rulesErr, fwErr, ipErr error
+		helperUp               = true
 	)
 	wg.Go(func() { snap.Windows, ipErr = m.Backend.WindowsIPs(ctx) })
 	wg.Go(func() { firewall, fwErr = m.Backend.FirewallPorts(ctx, m.Mirrored) })
 	if !m.Mirrored {
 		wg.Go(func() { rules, rulesErr = m.Backend.Rules(ctx) })
+		wg.Go(func() {
+			// A failed check isn't worth a warning of its own.
+			if up, err := m.Backend.IPHelperRunning(ctx); err == nil {
+				helperUp = up
+			}
+		})
 	}
 	listeners, lErr := m.Backend.Listeners(wslAddr.IP)
 	wg.Wait()
@@ -138,6 +160,12 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	if lErr != nil {
 		snap.Warnings = append(snap.Warnings, "reading listening ports: "+lErr.Error())
+	}
+
+	if !helperUp {
+		snap.IPHelperStopped = true
+		snap.Warnings = append(snap.Warnings,
+			"Windows' IP Helper service is stopped, so forwards pass no traffic. Adding or repairing a port starts it.")
 	}
 
 	snap.Listeners = listeners

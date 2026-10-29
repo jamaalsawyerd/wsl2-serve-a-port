@@ -1,13 +1,18 @@
-BINARY := serve-a-port
-PKG    := ./cmd/serve-a-port
+BINARY  := serve-a-port
+PKG     := ./cmd/serve-a-port
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build run test cover lint tidy clean
+.PHONY: build run demo test cover lint tidy clean
 
 build:
-	go build -o bin/$(BINARY) $(PKG)
+	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(PKG)
 
 run:
 	go run $(PKG)
+
+demo:
+	go run $(PKG) demo
 
 test:
 	go test ./...
