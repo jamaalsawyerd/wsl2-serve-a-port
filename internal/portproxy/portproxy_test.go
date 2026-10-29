@@ -39,6 +39,14 @@ func TestParseRules(t *testing.T) {
 	}
 }
 
+func TestParseFirewallPorts(t *testing.T) {
+	out := "wsl2-serve-a-port-tcp-3000\nsomething-else\nwsl2-serve-a-port-tcp-x\nwsl2-serve-a-port-tcp-5173\n"
+	got := parseFirewallPorts(out, firewallRulePrefix)
+	if len(got) != 2 || got[0] != 3000 || got[1] != 5173 {
+		t.Errorf("parseFirewallPorts = %v", got)
+	}
+}
+
 var wslIP = netip.MustParseAddr("172.17.213.47")
 
 func golden(t *testing.T, name, got string) {

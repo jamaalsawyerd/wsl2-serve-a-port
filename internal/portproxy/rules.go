@@ -49,21 +49,32 @@ func ParseRules(out string) []Rule {
 }
 
 // FirewallPorts returns the ports that have one of our inbound firewall
-// rules, found by rule name.
-func FirewallPorts(ctx context.Context, ps winexec.PowerShell) ([]int, error) {
-	out, err := ps.Command(ctx, fmt.Sprintf(
-		"Get-NetFirewallRule -Group %s -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }",
-		winexec.Quote(FirewallGroup)))
+// rules, found by rule name. In mirrored mode it looks at Hyper-V firewall
+// rules instead.
+func FirewallPorts(ctx context.Context, ps winexec.PowerShell, mirrored bool) ([]int, error) {
+	script := fmt.Sprintf("Get-NetFirewallRule -Group %s -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }",
+		winexec.Quote(FirewallGroup))
+	prefix := firewallRulePrefix
+	if mirrored {
+		script = fmt.Sprintf("Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue | Where-Object { $_.Name -like %s } | ForEach-Object { $_.Name }",
+			winexec.Quote(hyperVRulePrefix+"*"))
+		prefix = hyperVRulePrefix
+	}
+	out, err := ps.Command(ctx, script)
 	if err != nil {
 		return nil, fmt.Errorf("listing firewall rules: %w", err)
 	}
+	return parseFirewallPorts(out, prefix), nil
+}
+
+func parseFirewallPorts(out, prefix string) []int {
 	var ports []int
 	for line := range strings.Lines(out) {
-		if p, ok := strings.CutPrefix(strings.TrimSpace(line), firewallRulePrefix); ok {
+		if p, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
 			if n, err := strconv.Atoi(p); err == nil {
 				ports = append(ports, n)
 			}
 		}
 	}
-	return ports, nil
+	return ports
 }
