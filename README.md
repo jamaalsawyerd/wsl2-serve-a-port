@@ -30,8 +30,20 @@ make build
 
 Run `serve-a-port` with no arguments for the interactive dashboard: your WSL
 and Windows LAN IPs, every forwarded port with a live status, and hints for
-servers that are listening but not shared yet. (Adding and removing ports
-from the dashboard is in progress.)
+servers that are listening but not shared yet.
+
+| Key | Action |
+| --- | --- |
+| `a` | Add ports: pick from servers running in WSL, or type `3000`, `8000-8010`, `3000, 5173` |
+| `d` | Remove the selected forward |
+| `D` | Remove every forward serve-a-port created |
+| `r` | Repair forwards that point at an old WSL IP or lost their rules |
+| `R` | Refresh |
+| `?` | All keys |
+| `q` | Quit (forwards stay in place) |
+
+Every change shows exactly what will run, then goes through one Windows admin
+(UAC) prompt.
 
 The same operations are available as subcommands for scripting:
 

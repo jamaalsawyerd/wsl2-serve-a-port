@@ -10,15 +10,21 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/forward"
+	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/netinfo"
+	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/portproxy"
 	"github.com/jamaalsawyerd/wsl2-serve-a-port/internal/wsl"
 )
 
 // Service is the part of forward.Manager the UI uses.
 type Service interface {
 	Snapshot(ctx context.Context) (forward.Snapshot, error)
+	Add(ctx context.Context, snap forward.Snapshot, ports []int, takeOver bool) ([]portproxy.Result, error)
+	Remove(ctx context.Context, ports []int) ([]portproxy.Result, error)
+	Repair(ctx context.Context, snap forward.Snapshot) ([]portproxy.Result, error)
 }
 
 // Deps are the UI's hooks into the system, swappable in tests.
@@ -32,6 +38,10 @@ type screen int
 const (
 	screenBoot screen = iota
 	screenDashboard
+	screenAdd
+	screenConfirm
+	screenApplying
+	screenResult
 )
 
 type (
@@ -95,6 +105,13 @@ type Model struct {
 	toast     string
 	toastKind toastKind
 	toastID   int
+
+	// Add form, confirm, apply, and result.
+	form     *huh.Form
+	add      *addForm
+	pending  action
+	results  []portproxy.Result
+	applyErr error
 }
 
 // New returns the root model. ctx bounds every system call it makes.
@@ -174,10 +191,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
-		if m.screen == screenBoot {
+		switch m.screen {
+		case screenBoot:
 			return m.updateBootKeys(msg)
+		case screenDashboard:
+			return m.updateDashboardKeys(msg)
+		case screenAdd:
+			if msg.String() == "esc" {
+				m.screen, m.form = screenDashboard, nil
+				return m, nil
+			}
+			return m.updateForm(msg)
+		case screenConfirm:
+			switch msg.String() {
+			case "enter", "y":
+				m.screen = screenApplying
+				return m, m.apply(m.pending)
+			case "esc", "n", "q":
+				m.screen = screenDashboard
+			}
+		case screenResult:
+			switch msg.String() {
+			case "enter", "esc", "q", " ":
+				m.screen = screenDashboard
+			}
 		}
-		return m.updateDashboardKeys(msg)
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -235,8 +274,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 		}
 		return m, nil
+
+	case applyDoneMsg:
+		m.screen = screenResult
+		m.results, m.applyErr = msg.results, msg.err
+		m.refreshing = true
+		return m, m.fetch()
+	}
+
+	// Anything else is internal to the form (cursor blinks, field changes).
+	if m.screen == screenAdd {
+		return m.updateForm(msg)
 	}
 	return m, nil
+}
+
+func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	f, cmd := m.form.Update(msg)
+	m.form = f.(*huh.Form)
+	switch m.form.State {
+	case huh.StateAborted:
+		m.screen, m.form = screenDashboard, nil
+		return m, nil
+	case huh.StateCompleted:
+		m.form = nil
+		ps, err := m.add.ports()
+		if err != nil {
+			m.screen = screenDashboard
+			return m, m.showToast(toastError, err.Error())
+		}
+		m.pending, m.screen = m.addAction(ps), screenConfirm
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m Model) startAdd() (tea.Model, tea.Cmd) {
+	m.form = m.newAddForm()
+	m.screen = screenAdd
+	return m, m.form.Init()
+}
+
+func (m Model) confirm(act action) (tea.Model, tea.Cmd) {
+	m.pending, m.screen = act, screenConfirm
+	return m, nil
+}
+
+func (m Model) listener(port int) *netinfo.Listener {
+	for i := range m.snap.Listeners {
+		if m.snap.Listeners[i].Port == port {
+			return &m.snap.Listeners[i]
+		}
+	}
+	return nil
 }
 
 func (m Model) updateBootKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -267,8 +357,30 @@ func (m Model) updateDashboardKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 			return m, m.fetch()
 		}
-	case key.Matches(msg, m.keys.Add, m.keys.Remove, m.keys.RemoveAll, m.keys.Repair):
-		return m, m.showToast(toastInfo, "🚧 Changing forwards from the UI arrives in the next phase")
+	case key.Matches(msg, m.keys.Add):
+		return m.startAdd()
+	case key.Matches(msg, m.keys.Remove):
+		if len(m.snap.Entries) == 0 {
+			return m, m.showToast(toastInfo, "Nothing to remove yet")
+		}
+		return m.confirm(action{kind: actRemove, ports: []int{m.snap.Entries[m.cursor].Port}})
+	case key.Matches(msg, m.keys.RemoveAll):
+		var managed []int
+		for _, e := range m.snap.Entries {
+			if e.Managed {
+				managed = append(managed, e.Port)
+			}
+		}
+		if len(managed) == 0 {
+			return m, m.showToast(toastInfo, "No serve-a-port forwards to remove")
+		}
+		return m.confirm(action{kind: actRemove, ports: managed})
+	case key.Matches(msg, m.keys.Repair):
+		broken := forward.RepairPorts(m.snap)
+		if len(broken) == 0 {
+			return m, m.showToast(toastSuccess, "✨ Everything's healthy, nothing to repair")
+		}
+		return m.confirm(action{kind: actRepair, ports: broken})
 	}
 	return m, nil
 }
@@ -284,6 +396,14 @@ func (m Model) View() tea.View {
 		content = m.bootView()
 	case screenDashboard:
 		content = m.dashboardView()
+	case screenAdd:
+		content = m.page(m.form.View() + "\n\n" + m.keyHint("esc", "cancel"))
+	case screenConfirm:
+		content = m.confirmView()
+	case screenApplying:
+		content = m.applyingView()
+	case screenResult:
+		content = m.resultView()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

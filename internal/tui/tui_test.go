@@ -65,11 +65,45 @@ type fakeService struct {
 	snap  forward.Snapshot
 	err   error
 	calls int
+
+	applyErr error
+	fail     map[int]string // port -> failure message
+	added    []int
+	takeOver bool
+	removed  []int
+	repaired []int
 }
 
 func (f *fakeService) Snapshot(context.Context) (forward.Snapshot, error) {
 	f.calls++
 	return f.snap, f.err
+}
+
+func (f *fakeService) results(op portproxy.OpKind, ps []int) ([]portproxy.Result, error) {
+	if f.applyErr != nil {
+		return nil, f.applyErr
+	}
+	var rs []portproxy.Result
+	for _, p := range ps {
+		msg, failed := f.fail[p]
+		rs = append(rs, portproxy.Result{Op: op, Port: p, OK: !failed, Message: msg})
+	}
+	return rs, nil
+}
+
+func (f *fakeService) Add(_ context.Context, _ forward.Snapshot, ps []int, takeOver bool) ([]portproxy.Result, error) {
+	f.added, f.takeOver = ps, takeOver
+	return f.results(portproxy.OpAdd, ps)
+}
+
+func (f *fakeService) Remove(_ context.Context, ps []int) ([]portproxy.Result, error) {
+	f.removed = ps
+	return f.results(portproxy.OpRemove, ps)
+}
+
+func (f *fakeService) Repair(_ context.Context, snap forward.Snapshot) ([]portproxy.Result, error) {
+	f.repaired = forward.RepairPorts(snap)
+	return f.results(portproxy.OpAdd, f.repaired)
 }
 
 func newModel(report wsl.Report, svc *fakeService, w, h int) Model {
@@ -109,8 +143,15 @@ func boot(t *testing.T, m Model) Model {
 func plain(m Model) string { return ansi.Strip(m.View().Content) }
 
 func press(s string) tea.KeyPressMsg {
-	if s == "down" {
+	switch s {
+	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	}
 	r := []rune(s)[0]
 	return tea.KeyPressMsg{Code: r, Text: s}
@@ -200,9 +241,14 @@ func TestRefreshAndToast(t *testing.T) {
 		t.Error("refresh error kicked us off the dashboard")
 	}
 
-	m = step(m, press("a"))
-	if !strings.Contains(plain(m), "next phase") {
-		t.Error("placeholder toast missing for add")
+	m = step(m, press("D"))
+	m = step(m, press("esc"))
+	empty := sampleSnapshot()
+	empty.Entries = nil
+	m.snap = empty
+	m = step(m, press("d"))
+	if !strings.Contains(plain(m), "Nothing to remove yet") {
+		t.Errorf("toast missing for remove with no entries:\n%s", plain(m))
 	}
 	m = step(m, toastExpiredMsg{id: m.toastID - 1})
 	if m.toast == "" {
