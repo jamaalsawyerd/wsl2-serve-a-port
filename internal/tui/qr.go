@@ -73,7 +73,7 @@ func (m Model) qrView() string {
 	hosts := m.hosts()
 	url := m.urlFor(m.qrPort, m.qrHost)
 
-	header := t.CardTitle.Render(fmt.Sprintf("Scan to open :%d 📱", m.qrPort))
+	header := t.CardTitle.Render(fmt.Sprintf("Scan to open :%d", m.qrPort))
 	var status string
 	if e, ok := m.snap.Entry(m.qrPort); ok {
 		icon, label, fg := t.Badge(e.Status)

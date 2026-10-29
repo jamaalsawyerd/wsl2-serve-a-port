@@ -57,7 +57,7 @@ func (m Model) cardsView(width int) string {
 	s := m.snap
 
 	wslLines := []string{
-		t.CardTitle.Render("🐧 WSL2"),
+		t.CardTitle.Render("❯_ WSL2"),
 		t.BigValue.Render(s.WSL.IP.String()),
 		t.Dim.Render(strings.Join(nonEmpty(s.WSL.Interface, m.report.Distro), " · ")),
 	}
@@ -106,7 +106,7 @@ func (m Model) forwardsView(width, maxRows int) string {
 	if len(entries) == 0 {
 		msg := lipgloss.JoinVertical(lipgloss.Center,
 			t.Body.Render("No ports forwarded yet."),
-			t.Dim.Render("Press ")+t.Accent.Render("a")+t.Dim.Render(" to open one 🚀"))
+			t.Dim.Render("Press ")+t.Accent.Render("a")+t.Dim.Render(" to open one."))
 		return t.Card.BorderForeground(t.Faint).Padding(1, 4).Render(msg)
 	}
 

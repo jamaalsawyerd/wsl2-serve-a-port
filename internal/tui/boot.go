@@ -68,7 +68,7 @@ func (m Model) fatalBox() string {
 		msg = msg[i+2:]
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		t.Bad.Render("serve-a-port needs WSL2 🐧"),
+		t.Bad.Render("serve-a-port needs WSL2"),
 		"",
 		t.Body.Width(min(60, max(20, m.width-12))).Render(msg),
 		"",

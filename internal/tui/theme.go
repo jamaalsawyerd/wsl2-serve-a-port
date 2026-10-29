@@ -10,6 +10,10 @@ import (
 
 // Theme is the synthwave palette plus the styles built from it. It's rebuilt
 // once the terminal reports whether its background is dark.
+//
+// Text inside bordered boxes must stick to single-width characters. Emoji
+// are measured as two cells, but some terminals draw them as one, which
+// shifts the right border; keep emoji to unbordered text.
 type Theme struct {
 	IsDark bool
 

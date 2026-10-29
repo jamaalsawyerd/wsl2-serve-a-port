@@ -187,7 +187,7 @@ func (m Model) quitView() string {
 	managed := m.managedPorts()
 	width := m.resultWidth()
 	lines := []string{
-		t.CardTitle.Render("Heading out? 👋"),
+		t.CardTitle.Render("Heading out?"),
 		"",
 		t.Body.Width(width - 6).Render(plural(len(managed), "port") + " will stay open to your network:"),
 		t.Accent.Render("  " + ansi.Truncate(ports.Format(managed), width-10, "…")),
@@ -219,7 +219,7 @@ func (m Model) resultView() string {
 
 	switch {
 	case errors.Is(m.applyErr, winexec.ErrElevationDeclined):
-		lines = append(lines, t.Warn.Bold(true).Render("😶 Admin permission declined"), "",
+		lines = append(lines, t.Warn.Bold(true).Render("⊘ Admin permission declined"), "",
 			t.Body.Render("Nothing was changed."))
 	case m.applyErr != nil:
 		lines = append(lines, t.Bad.Render("✗ That didn't work"), "",
@@ -259,15 +259,17 @@ func (m Model) resultView() string {
 	return m.page(card)
 }
 
+// successTitle sits inside a bordered card, so it avoids emoji: terminals
+// disagree on their width, which breaks the right border.
 func (m Model) successTitle() string {
 	n := len(m.results)
 	switch m.pending.kind {
 	case actAdd:
-		return "🎉 " + plural(n, "port") + " open to the network!"
+		return "✦ " + plural(n, "port") + " open to the network!"
 	case actRemove:
-		return "👋 " + plural(n, "port") + " closed"
+		return "✓ " + plural(n, "port") + " closed"
 	default:
-		return "🔧 " + plural(n, "forward") + " repaired"
+		return "✓ " + plural(n, "forward") + " repaired"
 	}
 }
 

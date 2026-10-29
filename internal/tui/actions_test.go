@@ -125,7 +125,7 @@ func TestAddTypedRange(t *testing.T) {
 	if !slices.Equal(svc.added, []int{8000, 8001, 8002}) || svc.takeOver {
 		t.Errorf("Add(%v, takeOver=%v)", svc.added, svc.takeOver)
 	}
-	if out := plain(m); !strings.Contains(out, "🎉 3 ports open to the network!") || !strings.Contains(out, "http://192.168.1.50:8001") {
+	if out := plain(m); !strings.Contains(out, "✦ 3 ports open to the network!") || !strings.Contains(out, "http://192.168.1.50:8001") {
 		t.Errorf("result screen:\n%s", out)
 	}
 	m = send(t, m, press("enter"))
@@ -189,7 +189,7 @@ func TestRemoveSelected(t *testing.T) {
 		t.Fatalf("expected remove confirm:\n%s", plain(m))
 	}
 	m = send(t, m, press("enter"))
-	if !slices.Equal(svc.removed, []int{5173}) || !strings.Contains(plain(m), "👋 1 port closed") {
+	if !slices.Equal(svc.removed, []int{5173}) || !strings.Contains(plain(m), "✓ 1 port closed") {
 		t.Errorf("removed %v:\n%s", svc.removed, plain(m))
 	}
 }
@@ -214,7 +214,7 @@ func TestRepair(t *testing.T) {
 		t.Fatalf("repair confirm:\n%s", out)
 	}
 	m = send(t, m, press("y"))
-	if !slices.Equal(svc.repaired, []int{5173, 6000}) || !strings.Contains(plain(m), "🔧 2 forwards repaired") {
+	if !slices.Equal(svc.repaired, []int{5173, 6000}) || !strings.Contains(plain(m), "✓ 2 forwards repaired") {
 		t.Errorf("repaired %v:\n%s", svc.repaired, plain(m))
 	}
 }
