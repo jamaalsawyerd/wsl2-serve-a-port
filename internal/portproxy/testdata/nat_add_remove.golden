@@ -1,0 +1,37 @@
+param([string]$ResultPath)
+$ErrorActionPreference = 'Stop'
+$results = New-Object System.Collections.Generic.List[object]
+function Add-Result($op, $port, $ok, $msg) {
+  $results.Add([pscustomobject]@{ op = $op; port = $port; ok = $ok; message = $msg })
+}
+# Under 'Stop', PowerShell 5.1 turns native stderr into terminating errors,
+# so the netsh helpers relax it and check $LASTEXITCODE instead.
+function Invoke-Netsh([string[]]$a) {
+  $ErrorActionPreference = 'Continue'
+  $o = & netsh.exe @a 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) { throw $o.Trim() }
+}
+function Remove-Proxy($port) {
+  $ErrorActionPreference = 'Continue'
+  & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$port 2>&1 | Out-Null
+}
+try {
+  try {
+    Remove-Proxy 3000
+    Invoke-Netsh @('interface','portproxy','add','v4tov4','listenaddress=0.0.0.0','listenport=3000','connectaddress=172.17.213.47','connectport=3000')
+    Get-NetFirewallRule -Name 'wsl2-serve-a-port-tcp-3000' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    New-NetFirewallRule -Name 'wsl2-serve-a-port-tcp-3000' -DisplayName 'WSL2 Serve-a-Port TCP 3000' -Group 'WSL2 Serve-a-Port' -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -Profile Any | Out-Null
+    Add-Result 'add' 3000 $true ''
+  } catch { Add-Result 'add' 3000 $false $_.Exception.Message }
+  try {
+    Remove-Proxy 8081
+    Get-NetFirewallRule -Name 'wsl2-serve-a-port-tcp-8081' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    if (Get-Command Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue) {
+      Get-NetFirewallHyperVRule -Name 'wsl2-serve-a-port-hv-tcp-8081' -ErrorAction SilentlyContinue | Remove-NetFirewallHyperVRule
+    }
+    Add-Result 'remove' 8081 $true ''
+  } catch { Add-Result 'remove' 8081 $false $_.Exception.Message }
+} finally {
+  ConvertTo-Json -Depth 4 -InputObject @{ results = $results.ToArray() } |
+    Set-Content -Path $ResultPath -Encoding UTF8
+}

@@ -1,0 +1,27 @@
+param([string]$ResultPath)
+$ErrorActionPreference = 'Stop'
+$results = New-Object System.Collections.Generic.List[object]
+function Add-Result($op, $port, $ok, $msg) {
+  $results.Add([pscustomobject]@{ op = $op; port = $port; ok = $ok; message = $msg })
+}
+# Under 'Stop', PowerShell 5.1 turns native stderr into terminating errors,
+# so the netsh helpers relax it and check $LASTEXITCODE instead.
+function Invoke-Netsh([string[]]$a) {
+  $ErrorActionPreference = 'Continue'
+  $o = & netsh.exe @a 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) { throw $o.Trim() }
+}
+function Remove-Proxy($port) {
+  $ErrorActionPreference = 'Continue'
+  & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$port 2>&1 | Out-Null
+}
+try {
+  try {
+    Get-NetFirewallHyperVRule -Name 'wsl2-serve-a-port-hv-tcp-5173' -ErrorAction SilentlyContinue | Remove-NetFirewallHyperVRule
+    New-NetFirewallHyperVRule -Name 'wsl2-serve-a-port-hv-tcp-5173' -DisplayName 'WSL2 Serve-a-Port TCP 5173' -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 5173 -Action Allow | Out-Null
+    Add-Result 'add' 5173 $true ''
+  } catch { Add-Result 'add' 5173 $false $_.Exception.Message }
+} finally {
+  ConvertTo-Json -Depth 4 -InputObject @{ results = $results.ToArray() } |
+    Set-Content -Path $ResultPath -Encoding UTF8
+}
